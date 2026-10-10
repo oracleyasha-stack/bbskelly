@@ -1,0 +1,210 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bbg-bg: #07090e;
+    --bbg-surface: #0e121a;
+    --bbg-surface-elevated: #161c28;
+    --bbg-border: #1e2638;
+    --bbg-amber: #ff9900;
+    --bbg-orange: #ff6600;
+    --bbg-cyan: #00d4ff;
+    --bbg-green: #00e676;
+    --bbg-red: #ff334b;
+    --bbg-text: #e2e8f0;
+    --bbg-muted: #7b889d;
+    --bbg-white: #ffffff;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    background-color: var(--bbg-bg);
+    color: var(--bbg-text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    overflow-x: hidden;
+    user-select: text;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  #root {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+  }
+}
+
+/* Keep the appearance control meaningful across the fixed-color terminal UI.
+   Theme tokens also recolor the existing utility classes so panel content,
+   controls, and headers stay in sync without losing their visual hierarchy. */
+[data-terminal-theme="classic-amber"] {
+  --theme-bg: #080603;
+  --theme-surface: #151006;
+  --theme-accent: #ffb000;
+  --theme-text: #f4d18a;
+  --theme-muted: #b69b62;
+}
+
+[data-terminal-theme="bloomberg-green"] {
+  --theme-bg: #041009;
+  --theme-surface: #0a1b10;
+  --theme-accent: #00d979;
+  --theme-text: #c8f5d7;
+  --theme-muted: #79ad8b;
+}
+
+[data-terminal-theme="neon-cyan"] {
+  --theme-bg: #041019;
+  --theme-surface: #0a1925;
+  --theme-accent: #00d4ff;
+  --theme-text: #c8f4ff;
+  --theme-muted: #79b6c7;
+}
+
+[data-terminal-theme="classic-amber"],
+[data-terminal-theme="bloomberg-green"],
+[data-terminal-theme="neon-cyan"] {
+  background-color: var(--theme-bg) !important;
+  color: var(--theme-text) !important;
+}
+
+[data-terminal-theme="classic-amber"] [class*="bg-[#"],
+[data-terminal-theme="bloomberg-green"] [class*="bg-[#"],
+[data-terminal-theme="neon-cyan"] [class*="bg-[#"] {
+  background-color: var(--theme-surface) !important;
+}
+
+[data-terminal-theme="classic-amber"] [class~="bg-amber-500"],
+[data-terminal-theme="bloomberg-green"] [class~="bg-amber-500"],
+[data-terminal-theme="neon-cyan"] [class~="bg-amber-500"] {
+  background-color: var(--theme-accent) !important;
+}
+
+[data-terminal-theme="classic-amber"] [class*="bg-amber-500/"],
+[data-terminal-theme="bloomberg-green"] [class*="bg-amber-500/"],
+[data-terminal-theme="neon-cyan"] [class*="bg-amber-500/"] {
+  background-color: color-mix(in srgb, var(--theme-accent) 18%, transparent) !important;
+}
+
+[data-terminal-theme="classic-amber"] [class*="text-amber-"],
+[data-terminal-theme="bloomberg-green"] [class*="text-amber-"],
+[data-terminal-theme="neon-cyan"] [class*="text-amber-"] {
+  color: var(--theme-accent) !important;
+}
+
+[data-terminal-theme="classic-amber"] [class*="border-amber-"],
+[data-terminal-theme="bloomberg-green"] [class*="border-amber-"],
+[data-terminal-theme="neon-cyan"] [class*="border-amber-"] {
+  border-color: color-mix(in srgb, var(--theme-accent) 55%, transparent) !important;
+}
+
+[data-terminal-theme="classic-amber"] [class*="text-zinc-200"],
+[data-terminal-theme="bloomberg-green"] [class*="text-zinc-200"],
+[data-terminal-theme="neon-cyan"] [class*="text-zinc-200"],
+[data-terminal-theme="classic-amber"] [class*="text-zinc-300"],
+[data-terminal-theme="bloomberg-green"] [class*="text-zinc-300"],
+[data-terminal-theme="neon-cyan"] [class*="text-zinc-300"] {
+  color: var(--theme-text) !important;
+}
+
+[data-terminal-theme="classic-amber"] [class*="text-zinc-400"],
+[data-terminal-theme="bloomberg-green"] [class*="text-zinc-400"],
+[data-terminal-theme="neon-cyan"] [class*="text-zinc-400"],
+[data-terminal-theme="classic-amber"] [class*="text-zinc-500"],
+[data-terminal-theme="bloomberg-green"] [class*="text-zinc-500"],
+[data-terminal-theme="neon-cyan"] [class*="text-zinc-500"],
+[data-terminal-theme="classic-amber"] [class*="text-zinc-600"],
+[data-terminal-theme="bloomberg-green"] [class*="text-zinc-600"],
+[data-terminal-theme="neon-cyan"] [class*="text-zinc-600"] {
+  color: var(--theme-muted) !important;
+}
+
+/* Custom Scrollbar — 8px target with 3:1+ contrast on dark */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #090c12;
+}
+::-webkit-scrollbar-thumb {
+  background: #3b4a68;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #ff9900;
+}
+
+/* Visible keyboard focus everywhere — terminal chrome previously killed it
+   with focus:outline-none in several panels. */
+:focus-visible {
+  outline: 2px solid #ff9900;
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
+/* Alpha Nova flash animations */
+@keyframes flashGreen {
+  0% { background-color: rgba(0, 230, 118, 0.4); color: #00e676; }
+  100% { background-color: transparent; }
+}
+
+@keyframes flashRed {
+  0% { background-color: rgba(255, 51, 75, 0.4); color: #ff334b; }
+  100% { background-color: transparent; }
+}
+
+/* Real-time ticker tape marquee. The track holds the list twice so the
+   -50% loop is seamless; pause on hover/focus so users can click a ticker. */
+@keyframes ticker-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+.ticker-tape-track {
+  animation: ticker-scroll 120s linear infinite;
+  will-change: transform;
+}
+
+.ticker-tape-track:hover,
+.ticker-tape-track:focus-within,
+.ticker-tape-track.ticker-paused {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ticker-tape-track,
+  .flash-up,
+  .flash-down {
+    animation: none !important;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.flash-up {
+  animation: flashGreen 0.75s ease-out;
+}
+
+.flash-down {
+  animation: flashRed 0.75s ease-out;
+}
+
+/* Subtle CRT scanline effect (modern subtle glass glow) */
+.scanlines {
+  background: linear-gradient(
+    rgba(18, 16, 16, 0) 50%, 
+    rgba(0, 0, 0, 0.25) 50%
+  ), linear-gradient(
+    90deg,
+    rgba(255, 0, 0, 0.03),
+    rgba(0, 255, 0, 0.01),
+    rgba(0, 0, 255, 0.03)
+  );
+  background-size: 100% 3px, 6px 100%;
+}
