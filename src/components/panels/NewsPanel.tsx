@@ -102,7 +102,7 @@ export const NewsPanel: React.FC<NewsPanelProps> = ({ security, onSelectTicker }
             id: `live-${ticker}-${i}`,
             headline: n.headline,
             summary: n.summary,
-            body: n.summary,
+            body: n.summary || n.headline,
             source: n.source,
             timestamp: n.timestamp,
             category: cat,
@@ -137,17 +137,23 @@ export const NewsPanel: React.FC<NewsPanelProps> = ({ security, onSelectTicker }
 
   const inCategory = (n: NewsStory) => category === 'ALL' || n.category === category;
 
+  // Seeded stories are simulated demo copy written at a fixed point in time,
+  // so their prices go stale. Never mix them into a live ticker feed: show them
+  // only when live headlines are unavailable, and always after live items.
   const tickerStories = useMemo(
-    () => [...liveStories, ...seededForTicker].filter(inCategory).sort(byNewestFirst),
+    () =>
+      liveStories.length > 0
+        ? liveStories.filter(inCategory).sort(byNewestFirst)
+        : seededForTicker.filter(inCategory).sort(byNewestFirst),
     [liveStories, seededForTicker, category]
   );
 
   const wireStories = useMemo(
-    () =>
-      (category === 'ALL' ? [...INITIAL_NEWS] : INITIAL_NEWS.filter((n) => n.category === category)).sort(
-        byNewestFirst
-      ),
-    [category]
+    () => [
+      ...liveStories.filter(inCategory).sort(byNewestFirst),
+      ...INITIAL_NEWS.filter(inCategory).sort(byNewestFirst),
+    ],
+    [liveStories, category]
   );
 
   const stories = scope === 'TICKER' ? tickerStories : wireStories;
@@ -270,9 +276,17 @@ export const NewsPanel: React.FC<NewsPanelProps> = ({ security, onSelectTicker }
           </button>
 
           <div className="space-y-2">
+            {!selectedStory.live && (
+              <div
+                role="note"
+                className="rounded border border-dashed border-amber-500/50 bg-amber-500/5 px-2 py-1 text-[10px] font-bold tracking-wide text-amber-300"
+              >
+                DEMO STORY — SIMULATED ALPHA NOVA COMMENTARY, NOT REAL NEWS. PRICES AND FIGURES IN IT MAY BE OUT OF DATE.
+              </div>
+            )}
             <div className="flex items-center space-x-2 text-[10px]">
               <span className="bg-amber-500/20 text-amber-400 font-bold px-1.5 py-0.5 rounded border border-amber-500/40">
-                {selectedStory.source}
+                {selectedStory.live ? selectedStory.source : `${selectedStory.source} · DEMO`}
               </span>
               <span className="text-zinc-400 flex items-center gap-1">
                 <Clock className="w-3 h-3 text-zinc-500" /> {selectedStory.timestamp}
@@ -354,16 +368,15 @@ export const NewsPanel: React.FC<NewsPanelProps> = ({ security, onSelectTicker }
                     </span>
                   ) : (
                     <span
-                      className={`font-bold px-1.5 py-0.5 rounded text-[9px] shrink-0 ${
-                        story.urgency === 'BREAKING'
-                          ? 'bg-rose-500 text-white'
-                          : 'bg-[#18233a] text-cyan-300 border border-[#233352]'
-                      }`}
+                      title="Simulated demo commentary — not real news"
+                      className="font-bold px-1.5 py-0.5 rounded text-[9px] shrink-0 border border-dashed border-amber-500/50 text-amber-300 bg-amber-500/5"
                     >
-                      {story.urgency}
+                      DEMO
                     </span>
                   )}
-                  <span className="text-amber-400 font-semibold truncate">{story.source}</span>
+                  <span className="text-amber-400 font-semibold truncate">
+                    {story.live ? story.source : `${story.source} · COMMENTARY`}
+                  </span>
                   <span className="text-zinc-500">•</span>
                   <span className="text-zinc-400 shrink-0">{story.timestamp}</span>
                   {story.live && <ExternalLink className="w-2.5 h-2.5 text-zinc-500 shrink-0" />}
@@ -403,9 +416,11 @@ export const NewsPanel: React.FC<NewsPanelProps> = ({ security, onSelectTicker }
                 {story.headline}
               </button>
 
-              <p className="text-zinc-400 text-[10px] line-clamp-2 leading-relaxed select-text">
-                {story.summary}
-              </p>
+              {story.summary && story.summary !== story.headline && (
+                <p className="text-zinc-400 text-[10px] line-clamp-2 leading-relaxed select-text">
+                  {story.summary}
+                </p>
+              )}
             </article>
           ))
           )}

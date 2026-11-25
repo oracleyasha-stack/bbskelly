@@ -36,6 +36,7 @@ export interface FundamentalsPatch {
   fwdPe?: number;
   eps?: number;
   beta?: number;
+  evEbitda?: number;
   divYield?: number;
   marketCap?: string;
   sector?: string;
@@ -194,6 +195,10 @@ class MarketEngine {
     if (finite(f.fwdPe)) next.fwdPe = f.fwdPe;
     if (finite(f.eps)) next.eps = f.eps;
     if (finite(f.beta)) next.beta = f.beta;
+    // EV/EBITDA used to keep a hard-coded seed value forever, so it could
+    // contradict the live P/E beside it. Once a live fundamentals record
+    // arrives, show Yahoo's figure or nothing ("N/A") — never the stale seed.
+    next.evEbitda = finite(f.evEbitda) && f.evEbitda > 0 ? f.evEbitda : undefined;
     if (finite(f.divYield)) next.divYield = f.divYield;
     if (typeof f.marketCap === 'string' && f.marketCap) next.marketCap = f.marketCap;
     if (finite(f.targetPrice)) next.targetPrice = f.targetPrice;

@@ -232,6 +232,14 @@ export const TickerTape: React.FC<TickerTapeProps> = ({ onSelectTicker }) => {
           })}
         </div>
       </div>
+
+      {/* Standing disclaimer — the terminal mixes live, delayed and demo data. */}
+      <span
+        className="hidden sm:inline shrink-0 pl-2 border-l border-[#1a2336] text-[9px] text-zinc-500 tracking-wide"
+        title="Educational tool. Quotes from Yahoo Finance and headlines from Google News may be delayed; items marked DEMO are simulated. Nothing here is investment advice or a recommendation to buy or sell."
+      >
+        NOT INVESTMENT ADVICE · DATA MAY BE DELAYED
+      </span>
     </footer>
   );
 };

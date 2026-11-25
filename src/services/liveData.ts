@@ -461,17 +461,34 @@ export function getFeedStatus(): FeedStatus {
   };
 }
 
-/** True during overlapping US (9:30-16:00 ET) / NSE (9:15-15:30 IST) cash hours, UTC-approx. */
-export function marketSessionLabel(now = new Date()): string {
-  const utcH = now.getUTCHours() + now.getUTCMinutes() / 60;
-  // 9:30 ET = 13:30 UTC (EST) / 14:30 UTC (EDT); use 13:30-20:00 UTC window
-  const usOpen = utcH >= 13.5 && utcH < 20;
-  // 9:15-15:30 IST = 3:45-10:00 UTC
-  const nseOpen = utcH >= 3.75 && utcH < 10;
+function venueOpen(timeZone: string, open: number, close: number, now: Date): boolean {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    weekday: 'short',
+    hour12: false,
+  }).formatToParts(now);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '0';
+  const weekday = get('weekday');
+  if (weekday === 'Sat' || weekday === 'Sun') return false;
+  const minutes = (Number(get('hour')) % 24) * 60 + Number(get('minute'));
+  return minutes >= open && minutes < close;
+}
+
+/**
+ * Session label for the chart status strip. Uses each venue's own time zone
+ * (so US daylight-saving shifts are handled) and only says "SIMULATED" when the
+ * quote feed really is simulated — a closed market with a live feed shows the
+ * last real close, not simulated data.
+ */
+export function marketSessionLabel(now = new Date(), live = liveDataActive): string {
+  const usOpen = venueOpen('America/New_York', 9 * 60 + 30, 16 * 60, now);
+  const nseOpen = venueOpen('Asia/Kolkata', 9 * 60 + 15, 15 * 60 + 30, now);
   if (usOpen && nseOpen) return 'US + NSE OPEN';
   if (usOpen) return 'US OPEN · NSE CLOSED';
   if (nseOpen) return 'NSE OPEN · US CLOSED';
-  return 'BOTH CLOSED · SHOWING LAST / SIMULATED';
+  return live ? 'BOTH CLOSED · LAST CLOSE' : 'BOTH CLOSED · SIMULATED';
 }
 
 export function isLiveDataActive(): boolean {
@@ -677,8 +694,23 @@ export async function fetchChartSeries(
   try {
     const data = await apiGet(`action=chart&symbol=${encodeURIComponent(yahooSymbol)}&tf=${timeframe}`);
     const points = data.points;
-    if (Array.isArray(points) && points.length > 1) return points as PricePoint[];
-    return null;
+    if (!Array.isArray(points) || points.length < 2) return null;
+    const series = points as PricePoint[];
+    // Yahoo often appends a final closing-print bar (e.g. 16:00) with
+    // open = high = low = close and zero volume. It made the OHLC header read
+    // "O=H=L=C, VOL 0k" by default, so drop that empty trailing bar.
+    const last = series[series.length - 1];
+    if (
+      series.length > 2 &&
+      last &&
+      !last.volume &&
+      last.open === last.high &&
+      last.high === last.low &&
+      last.low === last.close
+    ) {
+      return series.slice(0, -1);
+    }
+    return series;
   } catch (error) {
     console.warn('[liveData] chart fetch failed:', error);
     return null;
@@ -699,6 +731,28 @@ export interface TickerNewsItem {
 
 const newsCache = new Map<string, { items: TickerNewsItem[]; exp: number }>();
 
+/** Defensive clean-up of RSS summaries: removes any HTML that slipped through
+ * (encoded or not) and drops summaries that only repeat the headline. */
+function cleanSummary(summary: unknown, headline: string): string {
+  if (typeof summary !== 'string' || !summary) return '';
+  const decode = (t: string) =>
+    t
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;|&apos;/g, "'")
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&');
+  let text = decode(summary).replace(/<[^>]*>/g, ' ');
+  // Truncated feeds can leave a dangling, unclosed tag such as '<a href="...'.
+  text = text.replace(/<[^>]*$/, ' ').replace(/\s+/g, ' ').trim();
+  const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const s = norm(text);
+  const h = norm(headline);
+  if (!s || s === h || s.startsWith(h) || h.startsWith(s)) return '';
+  return text;
+}
+
 export async function fetchTickerNews(ticker: string, companyName?: string): Promise<TickerNewsItem[] | null> {
   const key = ticker.toUpperCase();
   const hit = newsCache.get(key);
@@ -711,7 +765,8 @@ export async function fetchTickerNews(ticker: string, companyName?: string): Pro
     if (!items) return null;
     const clean = items
       .filter((n) => n && typeof n.headline === 'string' && typeof n.link === 'string')
-      .slice(0, 15);
+      .slice(0, 15)
+      .map((n) => ({ ...n, summary: cleanSummary(n.summary, n.headline) }));
     newsCache.set(key, { items: clean, exp: Date.now() + 5 * 60 * 1000 });
     // Bound the cache so a long session cycling tickers can't grow it forever.
     if (newsCache.size > 200) {
