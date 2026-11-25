@@ -353,6 +353,7 @@ function mapFund(d) {
   setNum('fwdPe', raw(sd.forwardPE));
   setNum('eps', raw(dks.trailingEps));
   setNum('beta', raw(sd.beta));
+  setNum('evEbitda', raw(dks.enterpriseToEbitda));
   const dy = raw(sd.dividendYield);
   if (typeof dy === 'number') f.divYield = +(dy * 100).toFixed(2);
   const cap = raw(pr.marketCap);
@@ -882,16 +883,41 @@ async function actionAnalystActions(query) {
 // and trims it while the client never touches Google directly (no CORS pain).
 const newsCache = (globalThis.__newsCache = globalThis.__newsCache || new Map());
 
-function stripHtml(html) {
-  return String(html || '')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&amp;/g, '&')
+function decodeEntities(text) {
+  return String(text || '')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;|&apos;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&amp;/g, '&');
+}
+
+// RSS <description> carries entity-encoded HTML (&lt;a href=...&gt;). Tags must
+// be removed AFTER decoding, otherwise the decoded markup leaks into summaries
+// as raw "<a href=...>" text. Strip, decode, then strip again for double-encoded
+// feeds, and unwrap CDATA first.
+function stripHtml(html) {
+  const unwrapped = String(html || '').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1');
+  const once = decodeEntities(unwrapped.replace(/<[^>]*>/g, ' '));
+  return decodeEntities(once.replace(/<[^>]*>/g, ' '))
+    .replace(/<[^>]*>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+// Google News descriptions are usually just "<headline> <publisher>", which adds
+// nothing under the headline. Drop those so the wire doesn't repeat itself.
+function usefulSummary(summary, headline, source) {
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const s = norm(summary);
+  const h = norm(headline);
+  if (!s || !h) return '';
+  const withoutSource = source ? s.replace(new RegExp(`\\s*${norm(source).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`), '').trim() : s;
+  if (withoutSource === h || h.startsWith(withoutSource) || withoutSource.startsWith(h)) return '';
+  return summary;
 }
 
 function parseRssItems(xml) {
@@ -916,7 +942,7 @@ function parseRssItems(xml) {
       : rawTitle;
     const link = tag('link');
     const pubDate = tag('pubDate');
-    const summary = stripHtml(tag('description')).slice(0, 280);
+    const summary = usefulSummary(stripHtml(tag('description')).slice(0, 280), headline, sourceName);
     if (!headline || !link) continue;
     let timestamp = pubDate;
     let sortKey = Date.parse(pubDate);
@@ -924,7 +950,7 @@ function parseRssItems(xml) {
     else timestamp = new Date(sortKey).toUTCString().slice(5, 22);
     items.push({
       headline,
-      summary: summary || headline,
+      summary,
       source: sourceName || 'Google News',
       timestamp,
       link,
