@@ -28,6 +28,7 @@ export interface LiveQuote {
   currency?: string;
   name?: string;
   marketTime?: number;
+  regularSessionEnd?: number;
   series?: number[];
 }
 
@@ -159,6 +160,7 @@ class MarketEngine {
       bid: +(price - spread / 2).toFixed(2),
       ask: +(price + spread / 2).toFixed(2),
       sparkline: safeSparkline,
+      quote: { marketTime: q.marketTime, regularSessionEnd: q.regularSessionEnd },
       lastUpdate: typeof q.marketTime === 'number' && Number.isFinite(q.marketTime) ? q.marketTime * 1000 : Date.now(),
     };
     this.securities.set(updated.ticker, updated);
@@ -344,6 +346,7 @@ class MarketEngine {
         bid,
         ask,
         sparkline,
+        quote: undefined,
         lastUpdate: Date.now(),
       };
 

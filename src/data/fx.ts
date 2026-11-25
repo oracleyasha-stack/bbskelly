@@ -1,5 +1,7 @@
 export interface FxRow {
   pair: string;
+  source?: 'Yahoo';
+  marketTime?: number;
   rate: number;
   chg: number;
   pctChg: number;

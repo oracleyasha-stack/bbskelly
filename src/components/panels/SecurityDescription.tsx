@@ -194,7 +194,7 @@ export const SecurityDescription: React.FC<SecurityDescriptionProps> = ({ securi
           </div>
 
           <div className="bg-[#0b101c] p-2.5 rounded border border-[#172238] text-center">
-            <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">12M MEDIAN TARGET</span>
+            <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">12M MEAN TARGET</span>
             <span className="text-base font-extrabold text-amber-300 mt-0.5 block">
               {hasTarget && safeNum(security.targetPrice) ? `${symbol}${security.targetPrice.toFixed(2)}` : 'N/A'}
             </span>

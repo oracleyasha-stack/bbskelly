@@ -167,6 +167,7 @@ function toQuote(item, ytdItem) {
     currency: m.currency,
     name: m.longName || m.shortName,
     marketTime: m.regularMarketTime,
+    regularSessionEnd: m.currentTradingPeriod?.regular?.end,
     series: closes.slice(-40),
     ytd,
   };
@@ -252,6 +253,8 @@ async function actionChart(query) {
     const time = intraday ? `${hh}:${mm}` : `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
     points.push({
       time,
+      date: intraday ? undefined : d.toISOString().slice(0, 10),
+      adjustedClose: r0.indicators?.adjclose?.[0]?.adjclose?.[i] ?? undefined,
       open: r4(q.open ? q.open[i] : c),
       high: r4(q.high ? q.high[i] : c),
       low: r4(q.low ? q.low[i] : c),

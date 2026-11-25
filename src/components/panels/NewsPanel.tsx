@@ -88,6 +88,8 @@ export const NewsPanel: React.FC<NewsPanelProps> = ({ security, onSelectTicker }
     if (!ticker) return;
     let cancelled = false;
     setLiveState('loading');
+    setLiveStories([]);
+    setSelectedStory(null);
     fetchTickerNews(ticker, secName)
       .then((items) => {
         if (cancelled) return;
@@ -186,6 +188,98 @@ export const NewsPanel: React.FC<NewsPanelProps> = ({ security, onSelectTicker }
       onSelectTicker(t);
     }
   };
+
+  const groups = useMemo(() => {
+    const ordered: NewsStory[][] = [];
+    const ownership = new Map<string, NewsStory[]>();
+    for (const story of stories) {
+      const isFiling = story.live && /\b(acquires? [\d,]+ shares|shares (?:bought|sold|acquired|purchased) by|stock (?:bought|sold) by|(?:stake|position|holdings) (?:boosted|raised|increased|reduced|trimmed) by)\b/i.test(story.headline);
+      const date = newsTime(story.timestamp);
+      if (!isFiling || !date || story.tickers.length !== 1) {
+        ordered.push([story]);
+        continue;
+      }
+      const key = story.tickers[0] + '/' + new Date(date).toISOString().slice(0, 10);
+      const group = ownership.get(key);
+      if (group) group.push(story);
+      else {
+        const first = [story];
+        ownership.set(key, first);
+        ordered.push(first);
+      }
+    }
+    return ordered;
+  }, [stories]);
+
+  const renderStory = (story: NewsStory) => (
+    <article
+      key={story.id}
+      onClick={() => handleStoryClick(story)}
+      className="p-2 hover:bg-[#101726] transition-colors cursor-pointer group space-y-1 focus-within:bg-[#101726]"
+    >
+      <div className="flex items-center justify-between text-[10px]">
+        <div className="flex items-center space-x-2 min-w-0">
+          {story.live ? (
+            <span className="font-bold px-1.5 py-0.5 rounded text-[9px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 shrink-0">
+              LIVE
+            </span>
+          ) : (
+            <span
+              title="Simulated demo commentary — not real news"
+              className="font-bold px-1.5 py-0.5 rounded text-[9px] shrink-0 border border-dashed border-amber-500/50 text-amber-300 bg-amber-500/5"
+            >
+              DEMO
+            </span>
+          )}
+          <span className="text-amber-400 font-semibold truncate">
+            {story.live ? story.source : `${story.source} · COMMENTARY`}
+          </span>
+          <span className="text-zinc-500">•</span>
+          <span className="text-zinc-400 shrink-0">{story.timestamp}</span>
+          {story.live && <ExternalLink className="w-2.5 h-2.5 text-zinc-500 shrink-0" />}
+        </div>
+
+        <div className="flex space-x-1 shrink-0">
+          {story.tickers.map((t) =>
+            knownTicker(t) ? (
+              <button
+                key={t}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleTickerClick(t);
+                }}
+                className="text-[9px] bg-[#121929] hover:bg-amber-500/20 text-zinc-400 hover:text-amber-300 px-1.5 py-0.5 rounded border border-[#1b253b] transition-colors"
+              >
+                {t}
+              </button>
+            ) : (
+              <span
+                key={t}
+                title="Not listed in this terminal's coverage universe"
+                className="text-[9px] bg-[#0e1220] text-zinc-600 px-1.5 py-0.5 rounded border border-[#1d2740] cursor-not-allowed"
+              >
+                {t}
+              </span>
+            )
+          )}
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={(event) => { event.stopPropagation(); handleStoryClick(story); }}
+        className="block w-full text-left font-bold text-zinc-200 group-hover:text-amber-400 text-[11px] leading-snug transition-colors focus-visible:outline-2 focus-visible:outline-amber-400 rounded"
+      >
+        {story.headline}
+      </button>
+
+      {story.summary && story.summary !== story.headline && (
+        <p className="text-zinc-400 text-[10px] line-clamp-2 leading-relaxed select-text">
+          {story.summary}
+        </p>
+      )}
+    </article>
+  );
 
   return (
     <div className="h-full w-full bg-[#080d16] text-zinc-300 font-mono text-xs flex flex-col select-none">
@@ -354,75 +448,14 @@ export const NewsPanel: React.FC<NewsPanelProps> = ({ security, onSelectTicker }
               </button>
             </div>
           ) : (
-            stories.map((story) => (
-            <article
-              key={story.id}
-              onClick={() => handleStoryClick(story)}
-              className="p-2 hover:bg-[#101726] transition-colors cursor-pointer group space-y-1 focus-within:bg-[#101726]"
-            >
-              <div className="flex items-center justify-between text-[10px]">
-                <div className="flex items-center space-x-2 min-w-0">
-                  {story.live ? (
-                    <span className="font-bold px-1.5 py-0.5 rounded text-[9px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 shrink-0">
-                      LIVE
-                    </span>
-                  ) : (
-                    <span
-                      title="Simulated demo commentary — not real news"
-                      className="font-bold px-1.5 py-0.5 rounded text-[9px] shrink-0 border border-dashed border-amber-500/50 text-amber-300 bg-amber-500/5"
-                    >
-                      DEMO
-                    </span>
-                  )}
-                  <span className="text-amber-400 font-semibold truncate">
-                    {story.live ? story.source : `${story.source} · COMMENTARY`}
-                  </span>
-                  <span className="text-zinc-500">•</span>
-                  <span className="text-zinc-400 shrink-0">{story.timestamp}</span>
-                  {story.live && <ExternalLink className="w-2.5 h-2.5 text-zinc-500 shrink-0" />}
-                </div>
-
-                <div className="flex space-x-1 shrink-0">
-                  {story.tickers.map((t) =>
-                    knownTicker(t) ? (
-                      <button
-                        key={t}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleTickerClick(t);
-                        }}
-                        className="text-[9px] bg-[#121929] hover:bg-amber-500/20 text-zinc-400 hover:text-amber-300 px-1.5 py-0.5 rounded border border-[#1b253b] transition-colors"
-                      >
-                        {t}
-                      </button>
-                    ) : (
-                      <span
-                        key={t}
-                        title="Not listed in this terminal's coverage universe"
-                        className="text-[9px] bg-[#0e1220] text-zinc-600 px-1.5 py-0.5 rounded border border-[#1d2740] cursor-not-allowed"
-                      >
-                        {t}
-                      </span>
-                    )
-                  )}
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => handleStoryClick(story)}
-                className="block w-full text-left font-bold text-zinc-200 group-hover:text-amber-400 text-[11px] leading-snug transition-colors focus-visible:outline-2 focus-visible:outline-amber-400 rounded"
-              >
-                {story.headline}
-              </button>
-
-              {story.summary && story.summary !== story.headline && (
-                <p className="text-zinc-400 text-[10px] line-clamp-2 leading-relaxed select-text">
-                  {story.summary}
-                </p>
-              )}
-            </article>
-          ))
+            groups.map(group => group.length === 1 ? renderStory(group[0]) : (
+              <details key={group[0].id} className="p-2">
+                <summary className="cursor-pointer text-xs text-amber-300">
+                  {group.length} institutional ownership updates · {group[0].tickers[0]}
+                </summary>
+                {group.map(renderStory)}
+              </details>
+            ))
           )}
         </div>
       )}

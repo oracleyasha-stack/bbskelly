@@ -69,6 +69,7 @@ export interface Security {
   analystCount: number;
   sparkline: number[];
   lastUpdate: number;
+  quote?: { marketTime?: number; regularSessionEnd?: number };
   bid: number;
   ask: number;
   bidSize: number;

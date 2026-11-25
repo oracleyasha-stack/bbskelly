@@ -109,24 +109,10 @@ export function computePortfolioRisk(input: RiskInput): RiskStats {
   const blockVol = Math.sqrt(Math.max(0, variance));
   let annVolatility = blockVol;
 
-  // Sample stats from spark-implied histories. Spark steps are ~5-minute bars
-  // (Yahoo 5m closes; sim pulses model a ~5min slice) — never daily bars — so
-  // rescale to daily equivalents before annualizing. A degenerate sample
-  // (flat tape while markets are closed ⇒ stdev ≈ 0) is discarded outright so
-  // a ~0 vol can never price VaR or detonate risk contributions.
-  const STEPS_PER_DAY = 78;
   const TRADING_DAYS = 252;
-  let usableHistory = false;
-  const cleanReturns = Array.isArray(input.portfolioReturns)
-    ? input.portfolioReturns.filter((r) => Number.isFinite(r))
-    : [];
-  if (cleanReturns.length >= 20) {
-    const stepSd = stdev(cleanReturns);
-    if (stepSd > 1e-9) {
-      usableHistory = true;
-      annVolatility = stepSd * Math.sqrt(STEPS_PER_DAY * TRADING_DAYS);
-    }
-  }
+  const cleanReturns = (input.portfolioReturns ?? []).filter(Number.isFinite);
+  const usableHistory = cleanReturns.length >= MIN_RISK_DAYS;
+  if (usableHistory) annVolatility = stdev(cleanReturns) * Math.sqrt(TRADING_DAYS);
   const dailyVol = annVolatility / Math.sqrt(TRADING_DAYS);
 
   // Parametric VaR (normal): VaR = z * sigma_daily * NAV
@@ -139,19 +125,17 @@ export function computePortfolioRisk(input: RiskInput): RiskStats {
   let sharpe: number | null = null;
   let sortino: number | null = null;
   let maxDrawdown: number | null = null;
-  if (usableHistory && cleanReturns.length >= 20) {
+  if (usableHistory) {
     const rets = [...cleanReturns].sort((a, b) => a - b);
-    const idx = Math.max(0, Math.floor(0.05 * rets.length));
-    // Square-root-of-time: scale the 5-min quantile to a 1-day equivalent.
-    const dayScale = Math.sqrt(STEPS_PER_DAY);
+    const idx = Math.max(0, Math.ceil(0.05 * rets.length) - 1);
     const q05 = rets[idx];
-    var95Hist = Number.isFinite(q05) ? Math.max(0, -q05 * dayScale * totalValue) : null;
+    var95Hist = Number.isFinite(q05) ? Math.max(0, -q05 * totalValue) : null;
     const tail = rets.slice(0, idx + 1);
-    cvar95Hist = tail.length ? Math.max(0, -mean(tail) * dayScale * totalValue) : var95Hist;
-    const rfStep = Math.pow(1 + rf, 1 / (STEPS_PER_DAY * TRADING_DAYS)) - 1;
+    cvar95Hist = tail.length ? Math.max(0, -mean(tail) * totalValue) : var95Hist;
+    const rfStep = Math.pow(1 + rf, 1 / TRADING_DAYS) - 1;
     const excess = cleanReturns.map((r) => r - rfStep);
     const sd = stdev(excess);
-    const annScale = Math.sqrt(STEPS_PER_DAY * TRADING_DAYS);
+    const annScale = Math.sqrt(TRADING_DAYS);
     sharpe = sd > 0 ? (mean(excess) / sd) * annScale : null;
     const downside = excess.filter((x) => x < 0);
     const dd = downside.length >= 2 ? stdev(downside) : sd;
@@ -176,7 +160,7 @@ export function computePortfolioRisk(input: RiskInput): RiskStats {
     : [];
   if (
     cleanBench.length === cleanReturns.length &&
-    cleanReturns.length >= 20
+    usableHistory
   ) {
     const n = cleanReturns.length;
     const mp = mean(cleanReturns);
@@ -233,34 +217,53 @@ export function computePortfolioRisk(input: RiskInput): RiskStats {
   };
 }
 
-/** Build a deterministic pseudo daily-return history from sparklines when no chart cache exists. */
-export function sparklineReturns(spark: number[]): number[] {
-  const out: number[] = [];
-  if (!Array.isArray(spark)) return out;
-  for (let i = 1; i < spark.length; i++) {
-    const prev = spark[i - 1];
-    if (typeof prev !== 'number' || typeof spark[i] !== 'number') continue;
-    if (prev > 0 && isFinite(spark[i]) && isFinite(prev)) out.push(spark[i] / prev - 1);
+export const MIN_RISK_DAYS = 20;
+export type DailyCloses = Record<string, Record<string, number>>;
+
+/** Translate local P&L and cost at the reporting spot rate, then combine lots of the same asset. */
+export function usdHoldings(positions: PortfolioPosition[], usdInr: number): PortfolioPosition[] {
+  const holdings = new Map<string, PortfolioPosition>();
+  for (const position of positions) {
+    const rate = position.currency === 'INR' ? usdInr : 1;
+    const previous = holdings.get(position.ticker);
+    const quantity = (previous?.quantity ?? 0) + position.quantity;
+    const cost = (previous ? previous.entryPrice * previous.quantity : 0) + position.quantity * position.entryPrice / rate;
+    const marketValue = (previous?.marketValue ?? 0) + position.marketValue / rate;
+    // Keep the native currency to translate the historical closes separately.
+    holdings.set(position.ticker, {
+      ...position, quantity, entryPrice: cost / quantity, currentPrice: position.currentPrice / rate,
+      marketValue, unrealizedPnL: marketValue - cost,
+      unrealizedPnLPercent: cost ? (marketValue / cost - 1) * 100 : 0,
+      dayPnL: (previous?.dayPnL ?? 0) + position.dayPnL / rate,
+    });
   }
-  return out;
+  return Array.from(holdings.values());
 }
 
-/** Value-weighted portfolio daily returns from per-ticker histories (aligned by shortest length). */
-export function blendReturns(histories: Record<string, number[]>, weights: Record<string, number>): number[] {
-  if (!histories || typeof histories !== 'object' || !weights || typeof weights !== 'object') return [];
-  const keys = Object.keys(histories).filter((k) => Array.isArray(histories[k]) && histories[k].length > 1);
-  if (!keys.length) return [];
-  const n = Math.min(...keys.map((k) => histories[k].length));
-  if (!Number.isFinite(n) || n <= 0) return [];
-  const out: number[] = [];
-  for (let i = 0; i < n; i++) {
-    let r = 0;
-    for (const k of keys) {
-      const w = Number.isFinite(weights[k]) ? weights[k] : 0;
-      const v = histories[k][histories[k].length - n + i];
-      if (Number.isFinite(v)) r += w * v;
+/** Historical returns at today's portfolio weights. Match both ends of each observed interval. */
+export function alignedDailyReturns(holdings: PortfolioPosition[], closes: DailyCloses): number[] {
+  const nav = holdings.reduce((sum, p) => sum + p.marketValue, 0);
+  if (!holdings.length || nav <= 0) return [];
+  const series = holdings.map(holding => {
+    const prices = closes[holding.ticker] ?? {};
+    const dates = Object.keys(prices).sort();
+    const returns = new Map<string, number>();
+    for (let i = 1; i < dates.length; i++) {
+      const start = dates[i - 1], end = dates[i];
+      const fx = closes['USD/INR'];
+      const startFx = holding.currency === 'INR' ? fx?.[start] : 1;
+      const endFx = holding.currency === 'INR' ? fx?.[end] : 1;
+      if (!(startFx > 0 && endFx > 0 && prices[start] > 0 && prices[end] > 0)) continue;
+      const change = (prices[end] / endFx) / (prices[start] / startFx) - 1;
+      returns.set(start + '/' + end, change * holding.marketValue / nav);
     }
-    out.push(r);
+    return returns;
+  });
+  const returns: number[] = [];
+  for (const interval of series[0].keys()) {
+    if (series.every(history => history.has(interval))) {
+      returns.push(series.reduce((sum, history) => sum + history.get(interval)!, 0));
+    }
   }
-  return out;
+  return returns;
 }

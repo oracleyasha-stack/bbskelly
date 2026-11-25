@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import type { FunctionCode, LayoutMode, Security, TerminalTheme } from '../../types/terminal';
 import { FUNCTION_CODES } from '../../types/terminal';
+import { AVAILABLE_FUNCTIONS } from '../../data/functions';
 import { INITIAL_SECURITIES } from '../../data/securities';
 import { marketEngine } from '../../services/marketEngine';
 import { audioService } from '../../services/audioService';
@@ -105,7 +106,11 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   const suggestions = useMemo(() => {
     const token = firstToken.toUpperCase();
     if (dismissSuggestions || token.length === 0 || !/^[A-Z0-9/&.-]+$/.test(token)) return [];
-    return INITIAL_SECURITIES.filter(
+    const query = commandInput.trim().toLowerCase();
+    const functionMatches = query.length >= 2 ? AVAILABLE_FUNCTIONS.filter(f =>
+      f.label.toLowerCase().includes(query) || (f.code === 'FA' && ['financials', 'financial analysis'].some(alias => alias.startsWith(query)))
+    ) : [];
+    const securities = INITIAL_SECURITIES.filter(
       (s) =>
         s.ticker.toUpperCase().startsWith(token) ||
         (!tokenIsFunctionCode && s.name.toUpperCase().includes(token))
@@ -122,7 +127,9 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
         return aT.localeCompare(bT);
       })
       .slice(0, 12);
-  }, [firstToken, dismissSuggestions, tokenIsFunctionCode]);
+    const exact = securities.filter(s => s.ticker.toUpperCase() === token);
+    return [...exact, ...functionMatches, ...securities.filter(s => s.ticker.toUpperCase() !== token)].slice(0, 12);
+  }, [commandInput, firstToken, dismissSuggestions, tokenIsFunctionCode]);
 
   /**
    * True when the first token is already an exact ticker. In that case the user
@@ -149,11 +156,11 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
    * user typed after it. Picking "GS" from the "GOL" autocomplete of "GOL DES"
    * used to execute "GS GP", silently dropping the requested DES.
    */
-  const selectSuggestion = (sec: Security) => {
+  const selectSuggestion = (sec: Security | typeof AVAILABLE_FUNCTIONS[number]) => {
     audioService.playExecuteThud();
     setDismissSuggestions(true);
     const rest = commandInput.trim().split(/\s+/).slice(1).join(' ');
-    const next = rest ? `${sec.ticker} ${rest}` : `${sec.ticker} ${currentFunction}`;
+    const next = 'code' in sec ? sec.code : rest ? `${sec.ticker} ${rest}` : `${sec.ticker} ${currentFunction}`;
     setCommandInput(next);
     onExecuteCommand(next);
     inputRef.current?.focus();
@@ -202,6 +209,7 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
     if (e.key === 'Enter') {
       e.preventDefault();
       audioService.playExecuteThud();
+      setDismissSuggestions(true);
       onExecuteCommand(commandInput.trim());
     } else if (e.key === 'Escape') {
       // Escape only dismisses the autocomplete — never wipes the command line.
@@ -215,7 +223,12 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     audioService.playExecuteThud();
-    onExecuteCommand(commandInput.trim());
+    const match = suggestions[activeSuggestion];
+    if (match && 'code' in match && !exactFunctionInput && !firstTokenIsExactTicker) {
+      selectSuggestion(match);
+    } else {
+      onExecuteCommand(commandInput.trim());
+    }
   };
 
   return (
@@ -295,7 +308,7 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
           </select>
 
           {/* Layout Mode Controls */}
-          <div role="group" aria-label="Workspace layout" className="flex items-center border border-[#232d42] rounded bg-[#121824] p-0.5 space-x-0.5">
+          <div role="group" aria-label="Workspace layout" className="hidden md:flex items-center border border-[#232d42] rounded bg-[#121824] p-0.5 space-x-0.5">
             <button
               onClick={() => onChangeLayout('single')}
               aria-label="Single full screen"
@@ -405,7 +418,7 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
                 window.setTimeout(() => setIsFocused(false), 120);
               }}
               onKeyDown={handleKeyDown}
-              placeholder="Enter ticker or Alpha Nova command (e.g. NVDA US GP, DES, TOP, WEI, SIG, YCRV, OPTS, PORT, IB)..."
+              placeholder="Search a ticker or function, e.g. NVIDIA, financials, or NVDA GP"
               className="w-full bg-transparent px-2 py-1.5 text-xs text-amber-300 font-mono tracking-wide placeholder-zinc-600 focus:outline-none uppercase"
               autoComplete="off"
               spellCheck="false"
@@ -426,15 +439,16 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
             <div
               id="ticker-suggestions"
               role="listbox"
-              aria-label="Ticker suggestions"
+              aria-label="Securities and functions"
               className="absolute left-0 right-0 top-full mt-1 z-50 bg-[#0d1420] border border-[#2b3a58] rounded shadow-[0_16px_40px_rgba(0,0,0,0.75)] overflow-hidden flex flex-col max-h-[60vh]"
             >
               <div className="flex-1 min-h-0 overflow-y-auto">
-                {suggestions.map((sec, idx) => {
+                {suggestions.map((suggestion, idx) => {
+                  const sec = 'code' in suggestion ? suggestion : marketEngine.getSecurity(suggestion.ticker) ?? suggestion;
                   const isActive = idx === activeSuggestion;
                   return (
                     <div
-                      key={sec.ticker}
+                      key={'code' in sec ? 'function-' + sec.code : sec.ticker}
                       id={`ticker-option-${idx}`}
                       role="option"
                       aria-selected={isActive}
@@ -445,6 +459,9 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
                         isActive ? 'bg-amber-500/15 border-amber-400' : 'border-transparent hover:bg-[#131c2e]'
                       }`}
                     >
+                      {'code' in sec ? (
+                        <><strong className="text-amber-300">{sec.code}</strong><span>{sec.label.split(': ')[1]}</span></>
+                      ) : (<>
                       <span
                         className={`w-28 shrink-0 truncate font-bold ${
                           isActive ? 'text-amber-300' : 'text-amber-400'
@@ -467,6 +484,7 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
                       <span className="shrink-0 px-1 rounded border border-[#2b3a58] text-cyan-400 text-[10px]">
                         {sec.assetClass}
                       </span>
+                      </>)}
                     </div>
                   );
                 })}

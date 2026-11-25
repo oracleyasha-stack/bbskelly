@@ -47,8 +47,8 @@ interface LayoutSizes {
 
 const LAYOUT_SIZES_KEY = 'bloomberg-terminal:layout-sizes:v1';
 const DEFAULT_LAYOUT_SIZES: LayoutSizes = {
-  colPct: 50,
-  leftRowPct: 50,
+  colPct: 60,
+  leftRowPct: 66,
   rightRowPct: 50,
   splitPct: 50,
 };
@@ -145,17 +145,17 @@ export const QuadrantLayout: React.FC<QuadrantLayoutProps> = ({
   const rightColRef = useRef<HTMLDivElement>(null);
   const splitRef = useRef<HTMLDivElement>(null);
 
-  // Below the md breakpoint the workspace stacks vertically and drag handles hide.
-  const [isStacked, setIsStacked] = useState<boolean>(
+  // Below the desktop breakpoint the workspace shows one active function.
+  const [isNarrow, setIsNarrow] = useState<boolean>(
     () => typeof window !== 'undefined' && !window.matchMedia('(min-width: 768px)').matches
   );
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-      setIsStacked(true);
+      setIsNarrow(true);
       return;
     }
     const mq = window.matchMedia('(min-width: 768px)');
-    const onChange = () => setIsStacked(!mq.matches);
+    const onChange = () => setIsNarrow(!mq.matches);
     onChange();
     // Safari < 14 uses addListener/removeListener instead of addEventListener.
     if (typeof mq.addEventListener === 'function') {
@@ -180,7 +180,7 @@ export const QuadrantLayout: React.FC<QuadrantLayoutProps> = ({
   // quadrant maximized in one mode confusingly persists in another.
   React.useEffect(() => {
     setMaximizedQuadrant(null);
-  }, [layoutMode]);
+  }, [layoutMode, isNarrow]);
 
   const renderPanel = (code: FunctionCode) => {
     // Include the ticker in the ErrorBoundary key for ticker-bound panels so a
@@ -251,7 +251,7 @@ export const QuadrantLayout: React.FC<QuadrantLayoutProps> = ({
   };
 
   // If a quadrant is maximized, render just that quadrant
-  if (maximizedQuadrant !== null) {
+  if (!isNarrow && maximizedQuadrant !== null) {
     const code =
       maximizedQuadrant === 1 ? q1Func : maximizedQuadrant === 2 ? q2Func : maximizedQuadrant === 3 ? q3Func : q4Func;
     const setFunc =
@@ -279,53 +279,35 @@ export const QuadrantLayout: React.FC<QuadrantLayoutProps> = ({
   }
 
   // Single Panel Mode
-  if (layoutMode === 'single') {
+  if (isNarrow || layoutMode === 'single') {
     return (
-      <div className="h-full w-full p-1 bg-[#04060c]">
-        <PanelWrapper
-          title={getPanelTitle(activeFunction)}
-          code={activeFunction}
-          ticker={['GP', 'DES', 'FA', 'ANR', 'OPTS', 'TOP', 'SIG'].includes(activeFunction) ? security.ticker : undefined}
-          onChangeFunction={onSelectFunction}
-        >
-          {renderPanel(activeFunction)}
-        </PanelWrapper>
+      <div className="h-full w-full flex flex-col p-1 bg-[#04060c]">
+        {isNarrow && (
+          <nav aria-label="Research views" className="grid grid-cols-4 gap-1 pb-1">
+            {([['GP', 'Chart'], ['DES', 'Profile'], ['TOP', 'News'], ['WEI', 'Markets']] as const).map(([code, label]) => (
+              <button key={code} aria-pressed={activeFunction === code} onClick={() => onSelectFunction(code)}
+                className="min-h-9 rounded border border-zinc-700 text-xs text-zinc-300 aria-pressed:border-amber-500 aria-pressed:text-amber-300">
+                {label}
+              </button>
+            ))}
+          </nav>
+        )}
+        <div className="flex-1 min-h-0">
+          <PanelWrapper
+            title={getPanelTitle(activeFunction)}
+            code={activeFunction}
+            ticker={['GP', 'DES', 'FA', 'ANR', 'OPTS', 'TOP', 'SIG'].includes(activeFunction) ? security.ticker : undefined}
+            onChangeFunction={onSelectFunction}
+          >
+            {renderPanel(activeFunction)}
+          </PanelWrapper>
+        </div>
       </div>
     );
   }
 
   // Split Horizontal (2 side-by-side panels, divider is draggable)
   if (layoutMode === 'split-h') {
-    if (isStacked) {
-      return (
-        <div className="h-full w-full flex flex-col gap-1 p-1 bg-[#04060c] overflow-y-auto">
-          <div className="shrink-0 min-h-[340px] h-[50vh] flex flex-col">
-          <PanelWrapper
-            title={getPanelTitle(q1Func)}
-            code={q1Func}
-            ticker={['GP', 'DES', 'FA', 'ANR', 'OPTS', 'TOP', 'SIG'].includes(q1Func) ? security.ticker : undefined}
-            onToggleMaximize={() => setMaximizedQuadrant(1)}
-            onChangeFunction={handleQ1Change}
-          >
-            {renderPanel(q1Func)}
-          </PanelWrapper>
-          </div>
-
-          <div className="shrink-0 min-h-[340px] h-[50vh] flex flex-col">
-          <PanelWrapper
-            title={getPanelTitle(q2Func)}
-            code={q2Func}
-            ticker={['GP', 'DES', 'FA', 'ANR', 'OPTS', 'TOP', 'SIG'].includes(q2Func) ? security.ticker : undefined}
-            onToggleMaximize={() => setMaximizedQuadrant(2)}
-            onChangeFunction={setQ2Func}
-          >
-            {renderPanel(q2Func)}
-          </PanelWrapper>
-          </div>
-        </div>
-      );
-    }
-
     return (
       <div className="h-full w-full p-1 bg-[#04060c]">
         <div ref={splitRef} className="flex h-full w-full overflow-hidden">
@@ -361,36 +343,6 @@ export const QuadrantLayout: React.FC<QuadrantLayoutProps> = ({
 
   // Split Vertical (2 stacked panels, divider is draggable)
   if (layoutMode === 'split-v') {
-    if (isStacked) {
-      return (
-        <div className="h-full w-full flex flex-col gap-1 p-1 bg-[#04060c] overflow-y-auto">
-          <div className="shrink-0 min-h-[340px] h-[50vh] flex flex-col">
-          <PanelWrapper
-            title={getPanelTitle(q1Func)}
-            code={q1Func}
-            ticker={['GP', 'DES', 'FA', 'ANR', 'OPTS', 'TOP', 'SIG'].includes(q1Func) ? security.ticker : undefined}
-            onToggleMaximize={() => setMaximizedQuadrant(1)}
-            onChangeFunction={handleQ1Change}
-          >
-            {renderPanel(q1Func)}
-          </PanelWrapper>
-          </div>
-
-          <div className="shrink-0 min-h-[340px] h-[50vh] flex flex-col">
-          <PanelWrapper
-            title={getPanelTitle(q2Func)}
-            code={q2Func}
-            ticker={['GP', 'DES', 'FA', 'ANR', 'OPTS', 'TOP', 'SIG'].includes(q2Func) ? security.ticker : undefined}
-            onToggleMaximize={() => setMaximizedQuadrant(2)}
-            onChangeFunction={setQ2Func}
-          >
-            {renderPanel(q2Func)}
-          </PanelWrapper>
-          </div>
-        </div>
-      );
-    }
-
     return (
       <div className="h-full w-full p-1 bg-[#04060c]">
         <div ref={splitRef} className="flex h-full w-full flex-col overflow-hidden">
@@ -428,64 +380,6 @@ export const QuadrantLayout: React.FC<QuadrantLayoutProps> = ({
   }
 
   // 4-Quadrant Trading Workstation (Default Multi-Screen Setup)
-  // Narrow screens: scrollable stacked rows with usable min-heights.
-  // Desktop: draggable column/row dividers.
-  if (isStacked) {
-    return (
-      <div
-        className="h-full w-full flex flex-col gap-1 p-1 bg-[#04060c] overflow-y-auto"
-      >
-        <div className="shrink-0 min-h-[360px] h-[55vh] flex flex-col">
-        <PanelWrapper
-          title={getPanelTitle(q1Func)}
-          code={q1Func}
-          ticker={['GP', 'DES', 'FA', 'ANR', 'OPTS', 'TOP', 'SIG'].includes(q1Func) ? security.ticker : undefined}
-          onToggleMaximize={() => setMaximizedQuadrant(1)}
-          onChangeFunction={(c) => {
-            setQ1Func(c);
-            onSelectFunction(c);
-          }}
-        >
-          {renderPanel(q1Func)}
-        </PanelWrapper>
-        </div>
-
-        <div className="shrink-0 min-h-[360px] h-[55vh] flex flex-col">
-        <PanelWrapper
-          title={getPanelTitle(q2Func)}
-          code={q2Func}
-          ticker={['GP', 'DES', 'FA', 'ANR', 'OPTS', 'TOP', 'SIG'].includes(q2Func) ? security.ticker : undefined}
-          onToggleMaximize={() => setMaximizedQuadrant(2)}
-          onChangeFunction={setQ2Func}
-        >
-          {renderPanel(q2Func)}
-        </PanelWrapper>
-        </div>
-
-        <div className="shrink-0 min-h-[360px] h-[55vh] flex flex-col">
-        <PanelWrapper
-          title={getPanelTitle(q3Func)}
-          code={q3Func}
-          onToggleMaximize={() => setMaximizedQuadrant(3)}
-          onChangeFunction={setQ3Func}
-        >
-          {renderPanel(q3Func)}
-        </PanelWrapper>
-        </div>
-
-        <div className="shrink-0 min-h-[360px] h-[55vh] flex flex-col">
-        <PanelWrapper
-          title={getPanelTitle(q4Func)}
-          code={q4Func}
-          onToggleMaximize={() => setMaximizedQuadrant(4)}
-          onChangeFunction={setQ4Func}
-        >
-          {renderPanel(q4Func)}
-        </PanelWrapper>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="h-full w-full p-1 bg-[#04060c]">

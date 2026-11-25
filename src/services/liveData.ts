@@ -461,36 +461,6 @@ export function getFeedStatus(): FeedStatus {
   };
 }
 
-function venueOpen(timeZone: string, open: number, close: number, now: Date): boolean {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    hour: '2-digit',
-    minute: '2-digit',
-    weekday: 'short',
-    hour12: false,
-  }).formatToParts(now);
-  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '0';
-  const weekday = get('weekday');
-  if (weekday === 'Sat' || weekday === 'Sun') return false;
-  const minutes = (Number(get('hour')) % 24) * 60 + Number(get('minute'));
-  return minutes >= open && minutes < close;
-}
-
-/**
- * Session label for the chart status strip. Uses each venue's own time zone
- * (so US daylight-saving shifts are handled) and only says "SIMULATED" when the
- * quote feed really is simulated — a closed market with a live feed shows the
- * last real close, not simulated data.
- */
-export function marketSessionLabel(now = new Date(), live = liveDataActive): string {
-  const usOpen = venueOpen('America/New_York', 9 * 60 + 30, 16 * 60, now);
-  const nseOpen = venueOpen('Asia/Kolkata', 9 * 60 + 15, 15 * 60 + 30, now);
-  if (usOpen && nseOpen) return 'US + NSE OPEN';
-  if (usOpen) return 'US OPEN · NSE CLOSED';
-  if (nseOpen) return 'NSE OPEN · US CLOSED';
-  return live ? 'BOTH CLOSED · LAST CLOSE' : 'BOTH CLOSED · SIMULATED';
-}
-
 export function isLiveDataActive(): boolean {
   return liveDataActive;
 }
@@ -504,7 +474,10 @@ function applyFxRows(
     const yahooSymbol = map[row.pair];
     const q = yahooSymbol ? quotes[yahooSymbol] : undefined;
     if (!q || typeof q.price !== 'number' || !Number.isFinite(q.price)) continue;
+    if (q.price <= 0) continue;
     row.rate = q.price;
+    row.source = 'Yahoo';
+    row.marketTime = q.marketTime;
     if (typeof q.change === 'number' && Number.isFinite(q.change)) row.chg = q.change;
     if (typeof q.changePercent === 'number' && Number.isFinite(q.changePercent)) row.pctChg = q.changePercent;
     if (typeof q.high === 'number' && Number.isFinite(q.high)) row.high = q.high;
@@ -715,6 +688,25 @@ export async function fetchChartSeries(
     console.warn('[liveData] chart fetch failed:', error);
     return null;
   }
+}
+
+/** Completed daily closes keyed by exchange date, including FX history for USD reporting. */
+export async function fetchDailyCloses(ticker: string): Promise<Record<string, number>> {
+  const symbol = SECURITY_YAHOO[ticker] ?? FX_YAHOO[ticker];
+  if (!symbol) return {};
+  const { points } = await apiGet(`action=chart&symbol=${encodeURIComponent(symbol)}&tf=6M`);
+  const closes: Record<string, number> = {};
+  // Exclude today's partial candle for all covered venues.
+  const today = new Date().toISOString().slice(0, 10);
+  if (Array.isArray(points)) {
+    for (const point of points) {
+      const close = point?.adjustedClose ?? point?.close;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(point?.date) && point.date < today && Number.isFinite(close) && close > 0) {
+        closes[point.date] = close;
+      }
+    }
+  }
+  return closes;
 }
 
 /** Live ticker headlines via our /api/market proxy (Google News RSS upstream).
