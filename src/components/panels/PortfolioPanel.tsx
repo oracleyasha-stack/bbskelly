@@ -5,7 +5,9 @@ import { audioService } from '../../services/audioService';
 import { Briefcase, Plus, Trash2 } from 'lucide-react';
 import { PanelSection } from '../layout/PanelSection';
 import { formatMoney, formatSignedMoney } from '../../utils/format';
-import { blendReturns, computePortfolioRisk, sparklineReturns } from '../../services/riskEngine';
+import { FX_RATES } from '../../data/fx';
+import { fetchDailyCloses, subscribeLiveData } from '../../services/liveData';
+import { alignedDailyReturns, computePortfolioRisk, usdHoldings, MIN_RISK_DAYS, type DailyCloses } from '../../services/riskEngine';
 
 interface PortfolioPanelProps {
   onSelectTicker?: (ticker: string) => void;
@@ -56,13 +58,15 @@ export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({ onSelectTicker }
   const [newQty, setNewQty] = useState('50');
   const [newEntry, setNewEntry] = useState('220');
 
-// Re-render on every market tick so positions stay marked to market.
+  // Re-render on every market tick so positions stay marked to market.
   const [liveTick, setLiveTick] = useState(0);
   useEffect(() => {
     const unsubscribe = marketEngine.subscribe(() => setLiveTick((v) => v + 1));
+    const unsubscribeFeed = subscribeLiveData(() => setLiveTick(v => v + 1));
     const fallback = window.setInterval(() => setLiveTick((v) => v + 1), 15_000);
     return () => {
       unsubscribe();
+      unsubscribeFeed();
       window.clearInterval(fallback);
     };
   }, []);
@@ -77,7 +81,7 @@ export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({ onSelectTicker }
 
   // Mark each position to the engine's latest price (falls back to stored value).
   // Memoized on positions + liveTick so typing in the Add-Position modal (or any
-  // unrelated parent render) doesn't recompute blendReturns + risk per keystroke.
+  // unrelated parent render) doesn't recompute portfolio risk per keystroke.
   // liveTick is the refresh signal: the memo reads live engine prices via getSecurity.
   const livePositions: PortfolioPosition[] = useMemo(() => positions.map((p) => {
     const live = marketEngine.getSecurity(p.ticker);
@@ -94,6 +98,7 @@ export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({ onSelectTicker }
     const unrealizedPnL = marketValue - cost;
     return {
       ...p,
+      currency: live?.currency ?? p.currency ?? 'USD',
       currentPrice: price,
       marketValue,
       unrealizedPnL,
@@ -102,32 +107,30 @@ export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({ onSelectTicker }
     };
   }), [positions, liveTick]);
 
-  // Compute live portfolio metrics with a real covariance-block risk model.
-  // No hardcoded VaR/Sharpe/Beta: vol comes from asset-class assumptions blended
-  // with sparkline-implied histories, VaR is z * sigma_daily * NAV.
-  const portfolioStats = useMemo(() => {
-    const histories: Record<string, number[]> = {};
-    const wmap: Record<string, number> = {};
-    const nav = livePositions.reduce((a, p) => a + p.marketValue, 0);
-    for (const p of livePositions) {
-      const live = marketEngine.getSecurity(p.ticker);
-      const spark = live?.sparkline ?? [];
-      const rets = sparklineReturns(spark);
-      // Repeat short spark histories to reach a minimum sample for hist VaR;
-      // flagged as ESTIMATED in the UI.
-      const extended: number[] = [];
-      while (extended.length < 60 && rets.length > 0) extended.push(...rets);
-      histories[p.ticker] = extended.slice(-60);
-      wmap[p.ticker] = nav > 0 ? p.marketValue / nav : 0;
+  const usdInr = FX_RATES.find(row => row.pair === 'USD/INR')!;
+  const holdings = useMemo(() => usdHoldings(livePositions, usdInr.rate), [livePositions, usdInr.rate]);
+  const symbols = [...new Set(holdings.map(p => p.ticker))];
+  if (holdings.some(p => p.currency === 'INR')) symbols.push('USD/INR');
+  const historyKey = symbols.sort().join(',');
+  const [history, setHistory] = useState<{ key: string; closes: DailyCloses } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function refresh() {
+      const entries = await Promise.all((historyKey ? historyKey.split(',') : []).map(async ticker =>
+        [ticker, await fetchDailyCloses(ticker).catch(() => ({}))] as const
+      ));
+      if (!cancelled) setHistory({ key: historyKey, closes: Object.fromEntries(entries) });
     }
-    const blended = blendReturns(histories, wmap);
-    const risk = computePortfolioRisk({
-      positions: livePositions,
-      portfolioReturns: blended.length >= 12 ? blended : undefined,
-    });
-    const dayTotalPnL = livePositions.reduce((a, p) => a + p.dayPnL, 0);
-    return { ...risk, dayTotalPnL };
-  }, [livePositions]);
+    void refresh();
+    const timer = window.setInterval(refresh, 15 * 60_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [historyKey]);
+
+  const dailyReturns = useMemo(() => history?.key === historyKey
+    ? alignedDailyReturns(holdings, history.closes) : [], [history, historyKey, holdings]);
+  const portfolioStats = useMemo(() => computePortfolioRisk({
+    positions: holdings, portfolioReturns: dailyReturns,
+  }), [holdings, dailyReturns]);
 
   const handleRemove = (id: string) => {
     audioService.playKeyClick();
@@ -171,7 +174,7 @@ export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({ onSelectTicker }
       dayPnL: qty * sec.change,
       weight: 10,
       assetClass: sec.assetClass,
-      currency: (sec as any).currency || 'USD',
+      currency: sec.currency,
     };
 
     setPositions((prev) => [...prev, newPos]);
@@ -202,11 +205,11 @@ export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({ onSelectTicker }
       {/* Top Institutional KPI Cards (fixed height, no scroll) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 shrink-0">
         <div className="bg-[#0e1422] p-2.5 rounded-lg border border-[#1b253b]">
-          <span className="text-[10px] text-zinc-400 uppercase">PORTFOLIO NAV</span>
+          <span className="text-[10px] text-zinc-400 uppercase">PORTFOLIO NAV · USD</span>
           <span className="text-xl font-bold text-white block mt-0.5">
             {formatMoney(portfolioStats.totalValue)}
           </span>
-          <span className="text-[10px] text-zinc-500">Book Cost: {formatMoney(portfolioStats.totalCost, 0)}</span>
+          <span className="text-[10px] text-zinc-500">Cost at spot FX: {formatMoney(portfolioStats.totalCost, 0)}</span>
         </div>
 
         <div className="bg-[#0e1422] p-2.5 rounded-lg border border-[#1b253b]">
@@ -258,13 +261,20 @@ export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({ onSelectTicker }
 
       {/* Risk contribution strip */}
       <div className="shrink-0 rounded border border-[#1b253b] bg-[#0e1422] px-2.5 py-1.5 text-[10px] text-zinc-400">
+
+        {holdings.some(p => p.currency === 'INR') && (
+          <div>Base USD · USD/INR {usdInr.rate.toFixed(4)} · {usdInr.source
+            ? `Yahoo · ${usdInr.marketTime ? new Date(usdInr.marketTime * 1000).toUTCString() : 'quote time unavailable'}`
+            : 'ECB reference · 25 Sep 2026'} · Local P&L translated at spot</div>
+        )}
         <span className="font-bold text-zinc-300">RISK CONTRIB: </span>
         {portfolioStats.weights.map((w) => (
           <span key={w.ticker} className="mr-2">
             {w.ticker} {w.weight.toFixed(1)}% wt / {w.riskContribution.toFixed(1)}% risk
           </span>
         ))}
-        <span className="text-zinc-500">· RC from block model ρ=0.45, vols by asset class (sums to 100%) · sample stats scaled from ~5-min bars, ESTIMATED</span>
+        <span className="text-zinc-500">· RC from block model ρ=0.45, vols by asset class (sums to 100%) · {dailyReturns.length} aligned daily returns at current weights · {history?.key !== historyKey ? 'Loading history' :
+          dailyReturns.length < MIN_RISK_DAYS ? 'Insufficient history · model volatility' : 'Observed daily volatility'}</span>
       </div>
 
       {/* Holdings Table (own scroll region) */}

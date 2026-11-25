@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import type { PricePoint, Security } from '../../types/terminal';
 import { marketEngine } from '../../services/marketEngine';
 import { atr, bollinger, ema, smaCrossBacktest, vwap } from '../../services/quant';
-import { fetchChartSeries, getFeedStatus, marketSessionLabel } from '../../services/liveData';
+import { fetchChartSeries, getFeedStatus } from '../../services/liveData';
 import { audioService } from '../../services/audioService';
 import { usePersistentState, isOneOf } from '../../hooks/usePersistentState';
 import { TrendingUp, TrendingDown } from 'lucide-react';
@@ -48,6 +48,22 @@ const loadBool = (key: string, fallback: boolean): boolean => {
   }
   return fallback;
 };
+
+function quoteLabel(security: Security): string {
+  const quote = security.quote;
+  if (!quote) return 'Simulated quote';
+  if (!quote.marketTime) return 'Yahoo quote · time unavailable';
+  const now = Date.now() / 1000;
+  const atClose = quote.regularSessionEnd && now >= quote.regularSessionEnd &&
+    Math.abs(quote.marketTime - quote.regularSessionEnd) <= 60;
+  const zone = security.exchange === 'NSE' || security.exchange === 'BSE' ? 'Asia/Kolkata' :
+    ['NASDAQ', 'NYSE'].includes(security.exchange) ? 'America/New_York' : 'UTC';
+  const time = new Date(quote.marketTime * 1000).toLocaleString('en-US', {
+    timeZone: zone, month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit',
+    minute: '2-digit', hour12: false, timeZoneName: 'short',
+  });
+  return (atClose ? 'Last close' : 'Regular-session quote') + ' · ' + time;
+}
 
 export const ChartPanel: React.FC<ChartPanelProps> = ({ security }) => {
   const [timeframe, setTimeframe] = useState<ChartTimeframe>(loadChartTimeframe);
@@ -376,10 +392,10 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({ security }) => {
     <div className="flex flex-col h-full w-full bg-[#080c14] text-zinc-300 font-mono text-xs select-none">
       {/* Chart Top Metrics Header */}
       <div className="flex flex-wrap items-center justify-between px-2 py-1 bg-[#0c121e] border-b border-[#182236] gap-1.5">
-        <div className="flex items-center space-x-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span className="text-base font-bold text-amber-400">{security.ticker}</span>
           <span className="text-zinc-400 text-[11px] truncate max-w-[150px]">{security.name}</span>
-          <div className="flex items-baseline space-x-1.5">
+          <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1">
             {/* Header price is always the live security price. Previously this
                 showed the hovered/last chart candle close, so hovering the
                 chart or a stale series (e.g. GOLD) displayed a price that
@@ -401,12 +417,12 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({ security }) => {
             </span>
             <span
               className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
-                dataSource === 'live'
+                security.quote
                   ? 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10'
                   : 'text-zinc-500 border-[#212d44]'
               }`}
             >
-              {dataSource === 'live' ? 'LIVE · YAHOO FINANCE' : 'SIMULATED SERIES'}
+              {quoteLabel(security)}
             </span>
           </div>
         </div>
@@ -429,7 +445,7 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({ security }) => {
         )}
 
         {/* Timeframe & Overlay Toggles */}
-        <div className="flex items-center space-x-1">
+        <div className="flex flex-wrap items-center gap-1">
           {/* Timeframes */}
           <div className="flex items-center bg-[#101726] border border-[#202c44] rounded p-0.5 space-x-0.5" role="group" aria-label="Chart timeframe">
             {(['1D', '5D', '1M', '6M', '1Y', '5Y'] as const).map((tf) => (
@@ -449,118 +465,123 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({ security }) => {
             ))}
           </div>
 
-          {/* Chart Style Switcher */}
-          <div className="flex items-center bg-[#101726] border border-[#202c44] rounded p-0.5 space-x-0.5" role="group" aria-label="Chart style">
-            <button
-              onClick={() => {
-                audioService.playKeyClick();
-                setChartType('candles');
-              }}
-              aria-pressed={chartType === 'candles'}
-              title="Candlestick Chart"
-              className={`px-1.5 py-0.5 text-[10px] rounded ${
-                chartType === 'candles' ? 'bg-amber-500 text-black font-bold' : 'text-zinc-400'
-              }`}
-            >
-              CANDLES
-            </button>
-            <button
-              onClick={() => {
-                audioService.playKeyClick();
-                setChartType('area');
-              }}
-              aria-pressed={chartType === 'area'}
-              title="Mountain/Area Chart"
-              className={`px-1.5 py-0.5 text-[10px] rounded min-h-[24px] focus-visible:outline-2 focus-visible:outline-amber-400 ${
-                chartType === 'area' ? 'bg-amber-500 text-black font-bold' : 'text-zinc-400'
-              }`}
-            >
-              MOUNTAIN
-            </button>
-            <button
-              onClick={() => {
-                audioService.playKeyClick();
-                setChartType('line');
-              }}
-              aria-pressed={chartType === 'line'}
-              title="Line Chart"
-              className={`px-1.5 py-0.5 text-[10px] rounded min-h-[24px] focus-visible:outline-2 focus-visible:outline-amber-400 ${
-                chartType === 'line' ? 'bg-amber-500 text-black font-bold' : 'text-zinc-400'
-              }`}
-            >
-              LINE
-            </button>
-          </div>
+          <details className="relative">
+            <summary className="cursor-pointer rounded border border-zinc-700 px-2 py-1 text-[11px] text-amber-300">Chart tools</summary>
+            <div className="absolute right-0 z-20 mt-1 flex w-44 flex-wrap gap-1 rounded border border-zinc-700 bg-[#101726] p-2 shadow-lg">
+              {/* Chart Style Switcher */}
+              <div className="flex items-center bg-[#101726] border border-[#202c44] rounded p-0.5 space-x-0.5" role="group" aria-label="Chart style">
+                <button
+                  onClick={() => {
+                    audioService.playKeyClick();
+                    setChartType('candles');
+                  }}
+                  aria-pressed={chartType === 'candles'}
+                  title="Candlestick Chart"
+                  className={`px-1.5 py-0.5 text-[10px] rounded ${
+                    chartType === 'candles' ? 'bg-amber-500 text-black font-bold' : 'text-zinc-400'
+                  }`}
+                >
+                  CANDLES
+                </button>
+                <button
+                  onClick={() => {
+                    audioService.playKeyClick();
+                    setChartType('area');
+                  }}
+                  aria-pressed={chartType === 'area'}
+                  title="Mountain/Area Chart"
+                  className={`px-1.5 py-0.5 text-[10px] rounded min-h-[24px] focus-visible:outline-2 focus-visible:outline-amber-400 ${
+                    chartType === 'area' ? 'bg-amber-500 text-black font-bold' : 'text-zinc-400'
+                  }`}
+                >
+                  MOUNTAIN
+                </button>
+                <button
+                  onClick={() => {
+                    audioService.playKeyClick();
+                    setChartType('line');
+                  }}
+                  aria-pressed={chartType === 'line'}
+                  title="Line Chart"
+                  className={`px-1.5 py-0.5 text-[10px] rounded min-h-[24px] focus-visible:outline-2 focus-visible:outline-amber-400 ${
+                    chartType === 'line' ? 'bg-amber-500 text-black font-bold' : 'text-zinc-400'
+                  }`}
+                >
+                  LINE
+                </button>
+              </div>
 
-          {/* Technical Overlays Toggles */}
-          <button
-            onClick={() => setShowSMA20(!showSMA20)}
-            aria-pressed={showSMA20}
-            title="20-period simple moving average (cyan)"
-            className={`px-1.5 py-0.5 text-[10px] rounded border min-h-[24px] focus-visible:outline-2 focus-visible:outline-amber-400 ${
-              showSMA20 ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' : 'bg-transparent text-zinc-500 border-zinc-800'
-            }`}
-          >
-            SMA(20)
-          </button>
-          <button
-            onClick={() => setShowSMA50(!showSMA50)}
-            aria-pressed={showSMA50}
-            title="50-period simple moving average (amber)"
-            className={`px-1.5 py-0.5 text-[10px] rounded border min-h-[24px] focus-visible:outline-2 focus-visible:outline-amber-400 ${
-              showSMA50 ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-transparent text-zinc-500 border-zinc-800'
-            }`}
-          >
-            SMA(50)
-          </button>
-          <button
-            onClick={() => setShowEMA12(!showEMA12)}
-            aria-pressed={showEMA12}
-            title="12-period exponential moving average (purple)"
-            className={`px-1.5 py-0.5 text-[10px] rounded border min-h-[24px] focus-visible:outline-2 focus-visible:outline-amber-400 ${
-              showEMA12 ? 'bg-purple-500/20 text-purple-300 border-purple-500/40' : 'bg-transparent text-zinc-500 border-zinc-800'
-            }`}
-          >
-            EMA(12)
-          </button>
-          <button
-            onClick={() => setShowBB(!showBB)}
-            aria-pressed={showBB}
-            title="Bollinger Bands, 20-period 2 std dev (green)"
-            className={`px-1.5 py-0.5 text-[10px] rounded border min-h-[24px] focus-visible:outline-2 focus-visible:outline-amber-400 ${
-              showBB ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-transparent text-zinc-500 border-zinc-800'
-            }`}
-          >
-            BB(20)
-          </button>
-          <button
-            onClick={() => setShowVWAP(!showVWAP)}
-            aria-pressed={showVWAP}
-            title="Volume-weighted average price (pink)"
-            className={`px-1.5 py-0.5 text-[10px] rounded border min-h-[24px] focus-visible:outline-2 focus-visible:outline-amber-400 ${
-              showVWAP ? 'bg-pink-500/20 text-pink-300 border-pink-500/40' : 'bg-transparent text-zinc-500 border-zinc-800'
-            }`}
-          >
-            VWAP
-          </button>
-          <button
-            onClick={() => setLogScale(!logScale)}
-            aria-pressed={logScale}
-            title="Logarithmic price scale — use for long ranges (e.g. 5Y) to compare % moves"
-            className={`px-1.5 py-0.5 text-[10px] rounded border min-h-[24px] focus-visible:outline-2 focus-visible:outline-amber-400 ${
-              logScale ? 'bg-white/10 text-white border-zinc-500' : 'bg-transparent text-zinc-500 border-zinc-800'
-            }`}
-          >
-            LOG
-          </button>
-          <button
-            onClick={() => setShowBacktest(!showBacktest)}
-            className={`px-1.5 py-0.5 text-[10px] rounded border ${
-              showBacktest ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-transparent text-zinc-500 border-zinc-800'
-            }`}
-          >
-            BACKTEST
-          </button>
+              {/* Technical Overlays Toggles */}
+              <button
+                onClick={() => setShowSMA20(!showSMA20)}
+                aria-pressed={showSMA20}
+                title="20-period simple moving average (cyan)"
+                className={`px-1.5 py-0.5 text-[10px] rounded border min-h-[24px] focus-visible:outline-2 focus-visible:outline-amber-400 ${
+                  showSMA20 ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' : 'bg-transparent text-zinc-500 border-zinc-800'
+                }`}
+              >
+                SMA(20)
+              </button>
+              <button
+                onClick={() => setShowSMA50(!showSMA50)}
+                aria-pressed={showSMA50}
+                title="50-period simple moving average (amber)"
+                className={`px-1.5 py-0.5 text-[10px] rounded border min-h-[24px] focus-visible:outline-2 focus-visible:outline-amber-400 ${
+                  showSMA50 ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-transparent text-zinc-500 border-zinc-800'
+                }`}
+              >
+                SMA(50)
+              </button>
+              <button
+                onClick={() => setShowEMA12(!showEMA12)}
+                aria-pressed={showEMA12}
+                title="12-period exponential moving average (purple)"
+                className={`px-1.5 py-0.5 text-[10px] rounded border min-h-[24px] focus-visible:outline-2 focus-visible:outline-amber-400 ${
+                  showEMA12 ? 'bg-purple-500/20 text-purple-300 border-purple-500/40' : 'bg-transparent text-zinc-500 border-zinc-800'
+                }`}
+              >
+                EMA(12)
+              </button>
+              <button
+                onClick={() => setShowBB(!showBB)}
+                aria-pressed={showBB}
+                title="Bollinger Bands, 20-period 2 std dev (green)"
+                className={`px-1.5 py-0.5 text-[10px] rounded border min-h-[24px] focus-visible:outline-2 focus-visible:outline-amber-400 ${
+                  showBB ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-transparent text-zinc-500 border-zinc-800'
+                }`}
+              >
+                BB(20)
+              </button>
+              <button
+                onClick={() => setShowVWAP(!showVWAP)}
+                aria-pressed={showVWAP}
+                title="Volume-weighted average price (pink)"
+                className={`px-1.5 py-0.5 text-[10px] rounded border min-h-[24px] focus-visible:outline-2 focus-visible:outline-amber-400 ${
+                  showVWAP ? 'bg-pink-500/20 text-pink-300 border-pink-500/40' : 'bg-transparent text-zinc-500 border-zinc-800'
+                }`}
+              >
+                VWAP
+              </button>
+              <button
+                onClick={() => setLogScale(!logScale)}
+                aria-pressed={logScale}
+                title="Logarithmic price scale — use for long ranges (e.g. 5Y) to compare % moves"
+                className={`px-1.5 py-0.5 text-[10px] rounded border min-h-[24px] focus-visible:outline-2 focus-visible:outline-amber-400 ${
+                  logScale ? 'bg-white/10 text-white border-zinc-500' : 'bg-transparent text-zinc-500 border-zinc-800'
+                }`}
+              >
+                LOG
+              </button>
+              <button
+                onClick={() => setShowBacktest(!showBacktest)}
+                className={`px-1.5 py-0.5 text-[10px] rounded border ${
+                  showBacktest ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-transparent text-zinc-500 border-zinc-800'
+                }`}
+              >
+                BACKTEST
+              </button>
+            </div>
+          </details>
         </div>
       </div>
       {/* Feed + ATR + backtest status strip */}
@@ -576,9 +597,9 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({ security }) => {
             const feedErr = chartError ?? st.lastQuoteError;
             const series =
               dataSource === 'live'
-                ? 'SERIES: LIVE · YAHOO'
+                ? 'Chart: Yahoo'
                 : 'SERIES: SIMULATED — ILLUSTRATIVE ONLY, NOT MARKET DATA';
-            return `FEED: ${st.live ? (st.stale ? 'LIVE-STALE' : 'LIVE') : 'SIMULATED'} · quotes ${age} · ${series} · ${marketSessionLabel()}${
+            return `FEED: ${st.live ? (st.stale ? 'LIVE-STALE' : 'LIVE') : 'SIMULATED'} · Feed refresh ${age} · ${series}${
               feedErr ? ` · ERR: ${feedErr.slice(0, 60)}` : ''
             }`;
           })()}
@@ -632,7 +653,7 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({ security }) => {
             setHoverIndex(null);
           }
         }}
-        className="flex-1 w-full relative min-h-[220px] bg-[#070b12] focus-visible:outline-2 focus-visible:outline-amber-400"
+        className="flex-1 w-full relative min-h-[110px] bg-[#070b12] focus-visible:outline-2 focus-visible:outline-amber-400"
         onMouseMove={(e) => {
           if (!containerRef.current || data.length === 0) return;
           const rect = containerRef.current.getBoundingClientRect();

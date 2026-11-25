@@ -25,7 +25,7 @@ export const FunctionKeysBar: React.FC<FunctionKeysBarProps> = React.memo(({
   };
 
   return (
-    <div role="toolbar" aria-label="Asset class and function shortcuts" className="flex items-center space-x-1 px-2 py-1 bg-[#090d14] border-b border-[#2b3a58] overflow-x-auto text-[10px] font-mono">
+    <div role="toolbar" aria-label="Asset class and function shortcuts" className="hidden md:flex items-center space-x-1 px-2 py-1 bg-[#090d14] border-b border-[#2b3a58] overflow-x-auto text-[10px] font-mono">
       <span className="text-[9px] text-zinc-500 font-bold tracking-wider mr-1 shrink-0">AN:</span>
       <div className="flex items-center space-x-1 min-w-max">
         {FUNCTION_KEYS.map((item) => {

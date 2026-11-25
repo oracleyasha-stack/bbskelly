@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
 import type { FunctionCode } from '../../types/terminal';
 import { Maximize2, Minimize2, ChevronDown } from 'lucide-react';
+import { AVAILABLE_FUNCTIONS } from '../../data/functions';
 import { audioService } from '../../services/audioService';
 
 interface PanelWrapperProps {
@@ -16,23 +17,7 @@ interface PanelWrapperProps {
   headerAction?: React.ReactNode;
 }
 
-const AVAILABLE_FUNCTIONS: { code: FunctionCode; label: string }[] = [
-  { code: 'GP', label: 'GP: Graph Price & Chart' },
-  { code: 'DES', label: 'DES: Security Profile' },
-  { code: 'WEI', label: 'WEI: World Equity Indices' },
-  { code: 'TOP', label: 'TOP: News & Headlines Wire' },
-  { code: 'YCRV', label: 'YCRV: Govt Yield Curve (US/IN)' },
-  { code: 'FA', label: 'FA: Financial Analysis' },
-  { code: 'ANR', label: 'ANR: Analyst Recommendations' },
-  { code: 'OPTS', label: 'OPTS: Black-Scholes Options Pricer' },
-  { code: 'PORT', label: 'PORT: Portfolio & Risk Monitor' },
-  { code: 'FX', label: 'FX: Currency Matrix' },
-  { code: 'ECO', label: 'ECO: Economic Calendar' },
-  { code: 'MOST', label: 'MOST: Market Movers' },
-  { code: 'SIG', label: 'SIG: Top Regime Signals (HMM)' },
-  { code: 'IB', label: 'IB: Instant Quant Copilot' },
-  { code: 'HELP', label: 'HELP: Terminal Directory & Shortcuts' },
-];
+
 
 export const PanelWrapper: React.FC<PanelWrapperProps> = React.memo(({
   title,
